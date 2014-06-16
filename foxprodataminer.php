@@ -8,7 +8,7 @@ Author: Tobias Järvelöv
 Author Email: tobias@jarvelov.se
 License:
 
-  Copyright 2011 Tobias Järvelöv (tobias@jarvelov.se)
+  Copyright 2014 Tobias Järvelöv (tobias@jarvelov.se)
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2, as 
@@ -25,7 +25,11 @@ License:
   
 */
 
-//include('foxprodataminer-options.php');
+require('C:\inetpub\wwwroot\test\XBase\Class.php');
+
+Use XBase\Table;
+
+define( 'FPDDIR', WP_PLUGIN_DIR . '/foxprodataminer'  );
 
 class FoxproDataMiner {
 
@@ -34,6 +38,9 @@ class FoxproDataMiner {
 	 *--------------------------------------------*/
 	const name = 'Foxpro Data Miner';
 	const slug = 'foxpro_data_miner';
+	const plain = 'foxprodataminer';
+
+	var $settings, $options_page;
 	
 	/**
 	 * Constructor
@@ -57,6 +64,7 @@ class FoxproDataMiner {
 	 * Runs when the plugin is initialized
 	 */
 	function init_foxpro_data_miner() {
+
 		// Setup localization
 		load_plugin_textdomain( self::slug, false, dirname( plugin_basename( __FILE__ ) ) . '/lang' );
 		// Load JavaScript and stylesheets
@@ -67,18 +75,29 @@ class FoxproDataMiner {
 	
 		if ( is_admin() ) {
 			//this will run when in the WordPress admin
+			if (!class_exists(self::plain . '_settings'))
+				require(FPDDIR . '/' . self::plain .'-settings.php');
+				$this->settings = new foxpro_data_miner_settings();
+
+			if (!class_exists(self::plain . '_options'))
+				require(FPDDIR . '/'. self::plain .'-options.php');
+		        $this->options_page = new foxpro_data_miner_options();    		        
 		} else {
 			//this will run when on the frontend
 		}
 
-		/*
-		 * TODO: Define custom functionality for your plugin here
-		 *
-		 * For more information: 
-		 * http://codex.wordpress.org/Plugin_API#Hooks.2C_Actions_and_Filters
-		 */
 		add_action( 'your_action_here', array( &$this, 'action_callback_method_name' ) );
 		add_filter( 'your_filter_here', array( &$this, 'filter_callback_method_name' ) );    
+	}
+
+	/** Add option page content  */
+	function my_plugin_options() {
+		if ( !current_user_can( 'manage_options' ) )  {
+			wp_die( __( 'You do not have sufficient permissions to access this page.' ) );
+		}
+		echo '<div class="wrap">';
+		echo '<p>Here is where the form would go if I actually had options.</p>';
+		echo '</div>';
 	}
 
 	function action_callback_method_name() {
@@ -92,11 +111,44 @@ class FoxproDataMiner {
 	function render_shortcode($atts) {
 		// Extract the attributes
 		extract(shortcode_atts(array(
+			'database' => '',
 			'column' => '',
-			'database' => ''
+			'id' => ''
 			), $atts));
-		// you can now access the attribute values using $attr1 and $attr2
-		echo "shortcode $column $database";
+
+		//figure out what database is used and grab the data
+		$foxpro_data_miner_data = array();
+
+		$table = new Table('C:\inetpub\wwwroot\test\Faktura.dbf', array('ordernr'));
+
+		while ($record = $table->nextRecord()) {
+		    $foxpro_data_miner_data[] .= $record->ordernr;
+		}
+
+		rsort($foxpro_data_miner_data);
+
+		?>
+		<script type="text/javascript">
+			function applyFDMData<?php echo $id; ?>() {
+				var field = document.getElementById('field_'+<?php echo "'".$id."'"; ?>);
+				console.log(field.type);
+				if (field.type == 'text') {
+					field.value = <?php echo "'".$foxpro_data_miner_data[0]."'"; ?>;
+				} else if(field.type == 'select-one' || field.type == 'select-multiple') {
+					<?php
+					foreach ($foxpro_data_miner_data as $key => $value): ?>
+						var option<?php echo $key; ?> = document.createElement("option");
+						option<?php echo $key; ?>.text = <?php echo $val = ($value.length > 1 ? $value : '""'); ?>;
+						field.add(option<?php echo $key; ?>);
+				    <?php endforeach; ?>
+				}
+			}
+
+			jQuery( document ).ready(function($) {
+				setTimeout(applyFDMData<?php echo $id; ?>(),3000);
+			});
+		</script>
+		<?php
 	}
   
 	/**
