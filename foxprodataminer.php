@@ -113,7 +113,11 @@ class FoxproDataMiner {
 		extract(shortcode_atts(array(
 			'database' => '',
 			'column' => '',
-			'id' => ''
+			'id' => '',
+			'delimiter' => '',
+			'limit' => '500', //max is 500 records
+			'offset' => '0',
+			'sort' => 'first'
 			), $atts));
 
 		//figure out what database is used and grab the data
@@ -125,27 +129,40 @@ class FoxproDataMiner {
 		    $foxpro_data_miner_data[] .= $record->ordernr;
 		}
 
-		rsort($foxpro_data_miner_data);
+		if($sort == 'first') {
+			rsort($foxpro_data_miner_data);
+		}
+
+		$foxpro_data_miner_data = array_slice($foxpro_data_miner_data, $offset, $limit);
 
 		?>
 		<script type="text/javascript">
 			function applyFDMData<?php echo $id; ?>() {
-				var field = document.getElementById('field_'+<?php echo "'".$id."'"; ?>);
-				console.log(field.type);
-				if (field.type == 'text') {
+				var field = document.getElementById(<?php echo "'".$id."'"; ?>);
+				console.log(field.tagName.toLowerCase());
+				console.log('stuff');
+				if (field.tagName.toLowerCase() == 'text') {
 					field.value = <?php echo "'".$foxpro_data_miner_data[0]."'"; ?>;
-				} else if(field.type == 'select-one' || field.type == 'select-multiple') {
+				} else if(field.tagName.toLowerCase() == 'select-one' || field.tagName.toLowerCase() == 'select-multiple')  {
 					<?php
 					foreach ($foxpro_data_miner_data as $key => $value): ?>
 						var option<?php echo $key; ?> = document.createElement("option");
 						option<?php echo $key; ?>.text = <?php echo $val = ($value.length > 1 ? $value : '""'); ?>;
 						field.add(option<?php echo $key; ?>);
 				    <?php endforeach; ?>
+				} else if(field.tagName.toLowerCase() == 'div' || field.tagName.toLowerCase() == 'p' || field.tagName.toLowerCase() == 'pre' || field.tagName.toLowerCase() == 'blockquote' || field.tagName.toLowerCase() == 'pre') {
+					<?php
+					$i = 0;
+					$i++;
+						foreach ($foxpro_data_miner_data as $key => $value): ?>
+							field.innerHTML += <?php echo ($value.length > 1 ? $value : '""'); ?>;
+							field.innerHTML += <?php if($delimiter) { echo "'<".$delimiter.">'"; } ?>;
+						<?php endforeach; ?>
 				}
 			}
 
 			jQuery( document ).ready(function($) {
-				setTimeout(applyFDMData<?php echo $id; ?>(),3000);
+				setTimeout(applyFDMData<?php echo $id; ?>,500);
 			});
 		</script>
 		<?php
