@@ -24,8 +24,7 @@ License:
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
   
 */
-
-require('C:\inetpub\wwwroot\test\XBase\Class.php');
+require('XBase\Class.php');
 
 Use XBase\Table;
 
@@ -58,6 +57,20 @@ class FoxproDataMiner {
 	 */  
 	function install_foxpro_data_miner() {
 		// do not generate any output here
+    	global $wpdb;
+		$table_name = $wpdb->prefix . "fdm_dbs";
+	    $sql = "CREATE TABLE $table_name (
+			id mediumint(9) NOT NULL AUTO_INCREMENT,
+		    fdm_database VARCHAR(255) NOT NULL,
+		    fdm_column VARCHAR(255) DEFAULT '' NOT NULL,
+		    fdm_id mediumint(9) NOT NULL,
+		    fdm_data text NOT NULL,
+		    fdm_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		    UNIQUE KEY id (id)
+		);";
+
+		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' ); 
+		dbDelta($sql);
 	}
   
 	/**
@@ -86,26 +99,74 @@ class FoxproDataMiner {
 			//this will run when on the frontend
 		}
 
-		add_action( 'your_action_here', array( &$this, 'action_callback_method_name' ) );
-		add_filter( 'your_filter_here', array( &$this, 'filter_callback_method_name' ) );    
+		add_action( 'fdm_update_dbs', array( &$this, 'action_callback_fdm_update_dbs' ), 10, array($args = NULL) );
+		add_action( 'fdm_get_db_records', array( &$this, 'action_callback_fdm_get_db_records' ), 10, array($args = NULL) );
 	}
 
-	/** Add option page content  */
-	function my_plugin_options() {
-		if ( !current_user_can( 'manage_options' ) )  {
-			wp_die( __( 'You do not have sufficient permissions to access this page.' ) );
+	function action_callback_fdm_get_db_records($args) {
+		global $wpdb;
+		$option = get_option('foxpro_data_miner_options');
+		$table_name = $wpdb->prefix . "fdm_dbs";
+
+		if($option['database_name_text'] == $args['database']) {
+			$fdm_database = $args['database'];
+			$columns = explode(",",$option['database_columns']);
+			$columns = array_map('trim', $columns); //trim whitespace of any values in array
+
+			if(in_array($args['column'], $columns)) {
+				$fdm_column = $args['column'];
+				$fdm_path = $option['database_path'];
+				$fdm_limit = isset($args['limit']) ? $args['limit'] : 500; //TODO
+				$fdm_cache_limit = isset($args['cache_limit']) ? $args['cache_limit'] : 3600;
+			}
 		}
-		echo '<div class="wrap">';
-		echo '<p>Here is where the form would go if I actually had options.</p>';
-		echo '</div>';
+
+		$last_record_timestamp = 0;
+
+		$last_db_record = $wpdb->get_results("SELECT fdm_timestamp FROM $table_name WHERE fdm_db = '".$fdm_database."' AND fdm_column = '".$fdm_column."' ORDER BY fdm_timestamp DESC LIMIT 1", ARRAY_A);
+
+		$last_record_timestamp = strtotime(($last_db_record[0]['fdm_timestamp']));
+		$current_timestamp = time() - $fdm_cache_limit;
+
+		if($last_record_timestamp <= $current_timestamp || sizeof($last_record_timestamp) <= 0) {
+			do_action('fdm_update_dbs', array('database' => $fdm_database, 'database_path' => $fdm_path, 'column' => $fdm_column, 'limit' => $fdm_limit));
+		}
 	}
 
-	function action_callback_method_name() {
-		// TODO define your action method here
-	}
+	function action_callback_fdm_update_dbs($args) {
+		global $wpdb;
+		$option = get_option('foxpro_data_miner_options');
+		$table_name = $wpdb->prefix . "fdm_dbs";
 
-	function filter_callback_method_name() {
-		// TODO define your filter method here
+		$fdm_database = $args['database'];
+		$fdm_column = $args['column'];
+		$fdm_path = $args['database_path'];
+		$fdm_limit = $args['limit'];
+
+		if($fdm_database AND $fdm_column) {
+			$result = $wpdb->get_results("SELECT id FROM $table_name WHERE fdm_db = $fdm_database AND fdm_column = $fdm_column LIMIT $fdm_limit");
+			if(!$result) {
+				$fdm_db_records = array();
+
+				$table = new Table($fdm_path, array($fdm_column));
+
+				while ($record = $table->nextRecord()) {
+					$tmpRecord = $record->getChar($fdm_column);
+					$encRecord = (iconv("ISO-8859-1", "UTF-8", $tmpRecord)); //encode to utf-8 before adding to array
+				    $fdm_db_records[] = $encRecord;
+				}
+
+				foreach ($fdm_db_records as $fdm_id => $fdm_db_record) {
+				 	$wpdb->insert($table_name, array(
+				 		'fdm_db' => $fdm_database,
+				 		'fdm_column' => $fdm_column,
+				 		'fdm_id' => (int)$fdm_id,
+				 		'fdm_data' => $fdm_db_record
+				 		)
+				 	);
+				 }
+			}
+		}
 	}
 
 	function render_shortcode($atts) {
@@ -113,56 +174,71 @@ class FoxproDataMiner {
 		extract(shortcode_atts(array(
 			'database' => '',
 			'column' => '',
-			'id' => '',
+			'column2' => '',
+			'id' => '', //element to print the results to
 			'delimiter' => '',
+			'case' => '',
+			'operator' => 'eq',
 			'limit' => '500', //max is 500 records
-			'offset' => '0',
-			'sort' => 'first'
+			'cache_limit' => 3600, //do not change, may yield duplicate results
+			'offset' => '0', //split the array result from nth position
+			'display' => 'true', //whether or not to create the function that prints out the variables, js array still created
+			'delay' => 200,
+			'sort' => strtoupper('desc')
 			), $atts));
 
+		if(!$id) {
+			$display = 'false';
+		}
+
+		$operator_values = array('gt' => '>', 'lt' => '<', 'gte' => '>=', 'lte' => '<=', 'eq' => '=', 'ne' => '!=');
+		if(array_key_exists($operator, $operator_values)) {
+			$operator = $operator_values[$operator];
+		} else {
+			$operator = '=';
+		}
+
 		//figure out what database is used and grab the data
-		$foxpro_data_miner_data = array();
+		global $wpdb;
+		$table_name = $wpdb->prefix . "fdm_dbs";
 
-		$table = new Table('C:\inetpub\wwwroot\test\Faktura.dbf', array('ordernr'));
-
-		while ($record = $table->nextRecord()) {
-		    $foxpro_data_miner_data[] .= $record->ordernr;
+		if(!empty($column2) AND !empty($case)) {
+			do_action('fdm_get_db_records', array('database' => $database, 'column' => $column));
+			do_action('fdm_get_db_records', array('database' => $database, 'column' => $column2));
+			$foxpro_data_miner_data = $wpdb->get_results("SELECT a.fdm_data as fdm_data FROM $table_name a INNER JOIN $table_name b on a.fdm_id = b.fdm_id WHERE a.fdm_db = '".$database."' AND a.fdm_column = '".$column."' AND b.fdm_column = '".$column2."' AND b.fdm_data ".$operator." '".$case."' AND a.fdm_timestamp >= DATE_SUB( NOW(), INTERVAL ".$cache_limit." MINUTE) ORDER BY a.fdm_id ".$sort." LIMIT $limit", ARRAY_A);
+		} else {
+			do_action('fdm_get_db_records', array('database' => $database, 'column' => $column));
+			$foxpro_data_miner_data = $wpdb->get_results("SELECT fdm_data FROM $table_name WHERE fdm_db = '".$database."' AND fdm_column = '".$column."' ORDER BY fdm_id ".$sort." AND fdm_timestamp >= DATE_SUB( NOW(), INTERVAL ".$cache_limit." MINUTE) LIMIT $limit", ARRAY_A);
 		}
-
-		if($sort == 'first') {
-			rsort($foxpro_data_miner_data);
-		}
-
 		$foxpro_data_miner_data = array_slice($foxpro_data_miner_data, $offset, $limit);
 
 		?>
 		<script type="text/javascript">
-			function applyFDMData<?php echo $id; ?>() {
+			function applyFDMData_<?php echo $id; ?>Arr(field,data) {
 				var field = document.getElementById(<?php echo "'".$id."'"; ?>);
-				console.log(field.tagName.toLowerCase());
-				console.log('stuff');
-				if (field.tagName.toLowerCase() == 'text') {
-					field.value = <?php echo "'".$foxpro_data_miner_data[0]."'"; ?>;
-				} else if(field.tagName.toLowerCase() == 'select-one' || field.tagName.toLowerCase() == 'select-multiple')  {
-					<?php
-					foreach ($foxpro_data_miner_data as $key => $value): ?>
-						var option<?php echo $key; ?> = document.createElement("option");
-						option<?php echo $key; ?>.text = <?php echo $val = ($value.length > 1 ? $value : '""'); ?>;
-						field.add(option<?php echo $key; ?>);
-				    <?php endforeach; ?>
-				} else if(field.tagName.toLowerCase() == 'div' || field.tagName.toLowerCase() == 'p' || field.tagName.toLowerCase() == 'pre' || field.tagName.toLowerCase() == 'blockquote' || field.tagName.toLowerCase() == 'pre') {
-					<?php
-					$i = 0;
-					$i++;
-						foreach ($foxpro_data_miner_data as $key => $value): ?>
-							field.innerHTML += <?php echo ($value.length > 1 ? $value : '""'); ?>;
-							field.innerHTML += <?php if($delimiter) { echo "'<".$delimiter.">'"; } ?>;
-						<?php endforeach; ?>
+				if (field.tagName.toLowerCase() == 'text' || field.tagName.toLowerCase() == 'input') {
+					field.value = data[0];
+				} else if(field.tagName.toLowerCase() == 'select' || field.tagName.toLowerCase() == 'select-one' || field.tagName.toLowerCase() == 'select-multiple')  {
+					for(var i = 0; i < data.length; i++) {
+						var option = document.createElement("option");
+						option.text = data[i];
+						field.add(option);
+					}
+				} else if(field.tagName.toLowerCase() == 'div' || field.tagName.toLowerCase() == 'p' || field.tagName.toLowerCase() == 'pre' || field.tagName.toLowerCase() == 'blockquote' || field.tagName.toLowerCase() == 'pre' || field.tagName.toLowerCase() == 'textarea') {
+						for(var i = 0; i < data.length; i++) {
+							field.innerHTML += data[i];
+							field.innerHTML += <?php if($delimiter) { echo "'<".$delimiter.">'"; } else { echo '""'; } ?>;
+						}
 				}
 			}
 
 			jQuery( document ).ready(function($) {
-				setTimeout(applyFDMData<?php echo $id; ?>,500);
+				window.<?php echo $id; ?>Arr = [];
+				<?php foreach ($foxpro_data_miner_data as $key => $value): ?>
+					<?php echo $id; ?>Arr.push(<?php if((strlen($value['fdm_data'])) > 1) { echo "'".$value['fdm_data']."'"; } else { echo '""'; } ?>);
+				<?php endforeach; ?>
+
+				<?php if($display == 'true') { echo 'setTimeout(applyFDMData_'.$id.'Arr('.$id.','.$id.'Arr),'.$delay.');'; } ?>
 			});
 		</script>
 		<?php

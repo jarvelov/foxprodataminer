@@ -118,6 +118,7 @@ class Record
 
     public function getChar($columnName) 
     {
+        return "lol";
         return $this->forceGetString($columnName);
     }
 

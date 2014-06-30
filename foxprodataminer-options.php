@@ -22,7 +22,7 @@ class foxpro_data_miner_options {
 	
 		// Add a new submenu
 		$this->page = $page =  add_options_page(	
-			__('Foxpro Data Miner', 'foxpro_data_miner_options'), __('Foxpro Data Miner Options', 'foxpro_data_miner_options'), 
+			__('Foxpro Data Miner', 'foxpro_data_miner_options'), __('Foxpro Data Miner', 'foxpro_data_miner_options'), 
 			'administrator', 'foxpro_data_miner_options', array($this,'foxpro_data_miner_options_page') );
 
 //		add_action("load-$page", array($this, 'on_load'));
