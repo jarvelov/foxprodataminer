@@ -38,7 +38,7 @@ class Table
             throw new \Exception(sprintf('File %s cannot be found', $this->tableName));
         }
 
-        $this->fp = fopen($this->tableName, 'rbt');
+        $this->fp = fopen($this->tableName, 'rb');
         $this->readHeader();
 
         return $this->fp != false;
@@ -59,7 +59,6 @@ class Table
         $this->readBytes(8); //Reserved for multi-user dBASE
         $this->mdxFlag = $this->readByte();
         $this->languageCode = $this->readByte();
-        var_dump($this->languageCode);
         $this->readBytes(2); //reserved
 
         $fieldCount = ($this->headerLength - ($this->foxpro?296:33) ) / 32;
