@@ -157,13 +157,33 @@ class FoxproDataMiner {
 				}
 
 				foreach ($fdm_db_records as $fdm_id => $fdm_db_record) {
-				 	$wpdb->insert($table_name, array(
-				 		'fdm_db' => $fdm_database,
-				 		'fdm_column' => $fdm_column,
-				 		'fdm_id' => (int)$fdm_id,
-				 		'fdm_data' => $fdm_db_record
-				 		)
-				 	);
+					try {
+						$result = $wpdb->update($table_name,
+							array(
+					 			'fdm_data' => $fdm_db_record
+					 		),
+							array(
+						 		'fdm_db' => $fdm_database,
+						 		'fdm_column' => $fdm_column,
+						 		'fdm_id' => (int)$fdm_id,
+							)
+						);
+
+						if($result == 0) {
+							$wpdb->insert($table_name, array(
+					 			'fdm_db' => $fdm_database,
+					 			'fdm_column' => $fdm_column,
+					 			'fdm_id' => (int)$fdm_id,
+					 			'fdm_data' => $fdm_db_record
+					 			)
+				 			);
+						} else {
+							//var_dump($result);
+						}
+					} catch (exception $e) {
+				 		//var_dump($e);
+					}
+					
 				 }
 			}
 		}

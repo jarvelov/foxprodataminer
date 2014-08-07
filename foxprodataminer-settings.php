@@ -82,11 +82,11 @@ class foxpro_data_miner_settings {
 				<ul id="fdm-shortcode-list">
 					<li>database <small>(default: <i>none</i>)*</small>
 						<ol><strong>Accepted Values</strong></ol>
-						<ol>Any, see Configuring a database for accepted names for databases</ol>
+						<ol>Any, see <strong>Configuring a database</strong> for accepted names for databases</ol>
 					</li>
 					<li>column <small>(default: <i>none</i>)*</small>
 						<ol><strong>Accepted Values</strong></ol>
-						<ol>Any column in Database Columns field for the respective database</ol>
+						<ol>Any column listed in the <strong>Database Columns</strong> field for the respective database</ol>
 					</li>
 					<li>id <small>(default: <i>none</i>)*</small>
 						<ol><strong>Accepted Values</strong></ol>
