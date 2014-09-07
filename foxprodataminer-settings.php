@@ -55,7 +55,7 @@ class foxpro_data_miner_settings {
     }
 
     function render_text($args) {
-        $option = get_option('foxpro_data_miner_options');
+    	$option = get_option('foxpro_data_miner_options');
         $id = 'foxpro_data_miner_options['.$args['id'].']';
         $default = $args['default'];
         $value = $option[$args['id']];

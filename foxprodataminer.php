@@ -101,6 +101,9 @@ class FoxproDataMiner {
 
 		add_action( 'fdm_update_dbs', array( &$this, 'action_callback_fdm_update_dbs' ), 10, array($args = NULL) );
 		add_action( 'fdm_get_db_records', array( &$this, 'action_callback_fdm_get_db_records' ), 10, array($args = NULL) );
+		add_action( 'wp', 'fdm_setup_schedule' );
+		add_action( 'fdm_hourly_event', 'fdm_do_this_hourly' );
+
 	}
 
 	function action_callback_fdm_get_db_records($args) {
@@ -117,18 +120,15 @@ class FoxproDataMiner {
 				$fdm_column = $args['column'];
 				$fdm_path = $option['database_path'];
 				$fdm_limit = isset($args['limit']) ? $args['limit'] : 500; //TODO
-				$fdm_cache_limit = isset($args['cache_limit']) ? $args['cache_limit'] : 3600;
+				$fdm_cache_limit = isset($args['cache_limit']) ? $args['cache_limit'] : 3480;
 			}
 		}
 
-		$last_record_timestamp = 0;
-
 		$last_db_record = $wpdb->get_results("SELECT fdm_timestamp FROM $table_name WHERE fdm_db = '".$fdm_database."' AND fdm_column = '".$fdm_column."' ORDER BY fdm_timestamp DESC LIMIT 1", ARRAY_A);
-
 		$last_record_timestamp = strtotime(($last_db_record[0]['fdm_timestamp']));
-		$current_timestamp = time() - $fdm_cache_limit;
+		$current_timestamp = time() - (int)$fdm_cache_limit;
 
-		if($last_record_timestamp <= $current_timestamp || sizeof($last_record_timestamp) <= 0) {
+		if($last_record_timestamp < $current_timestamp) {
 			do_action('fdm_update_dbs', array('database' => $fdm_database, 'database_path' => $fdm_path, 'column' => $fdm_column, 'limit' => $fdm_limit));
 		}
 	}
@@ -144,20 +144,23 @@ class FoxproDataMiner {
 		$fdm_limit = $args['limit'];
 
 		if($fdm_database AND $fdm_column) {
-			$result = $wpdb->get_results("SELECT id FROM $table_name WHERE fdm_db = $fdm_database AND fdm_column = $fdm_column LIMIT $fdm_limit");
-			if(!$result) {
-				$fdm_db_records = array();
+			$fdm_db_records = array();
 
-				$table = new Table($fdm_path, array($fdm_column));
+			$table = new Table($fdm_path, array($fdm_column));
 
-				while ($record = $table->nextRecord()) {
-					$tmpRecord = $record->getChar($fdm_column);
-					$encRecord = (iconv("ISO-8859-1", "UTF-8", $tmpRecord)); //encode to utf-8 before adding to array
-				    $fdm_db_records[] = $encRecord;
-				}
+			while ($record = $table->nextRecord()) {
+				$tmpRecord = $record->getChar($fdm_column);
+				$encRecord = (iconv("ISO-8859-1", "UTF-8", $tmpRecord)); //encode to utf-8 before adding to array
+			    $fdm_db_records[] = $encRecord;
+			}
 
-				foreach ($fdm_db_records as $fdm_id => $fdm_db_record) {
-					try {
+			foreach ($fdm_db_records as $fdm_id => $fdm_db_record) {
+				try {
+
+					$result = $wpdb->get_results("SELECT id FROM $table_name WHERE fdm_id = $fdm_id AND fdm_data = $fdm_db_record", ARRAY_A);
+					$id = isset($result['id']) ? $result['id'] : false;
+
+					if($id) {
 						$result = $wpdb->update($table_name,
 							array(
 					 			'fdm_data' => $fdm_db_record
@@ -166,26 +169,23 @@ class FoxproDataMiner {
 						 		'fdm_db' => $fdm_database,
 						 		'fdm_column' => $fdm_column,
 						 		'fdm_id' => (int)$fdm_id,
+						 		'id' => $id
 							)
 						);
-
-						if($result == 0) {
-							$wpdb->insert($table_name, array(
-					 			'fdm_db' => $fdm_database,
-					 			'fdm_column' => $fdm_column,
-					 			'fdm_id' => (int)$fdm_id,
-					 			'fdm_data' => $fdm_db_record
-					 			)
-				 			);
-						} else {
-							//var_dump($result);
-						}
-					} catch (exception $e) {
-				 		//var_dump($e);
+					} else {
+						$wpdb->insert($table_name, array(
+			 				'fdm_db' => $fdm_database,
+			 				'fdm_column' => $fdm_column,
+			 				'fdm_id' => (int)$fdm_id,
+			 				'fdm_data' => $fdm_db_record
+			 				)
+		 				);
 					}
-					
-				 }
-			}
+				} catch (exception $e) {
+			 		//var_dump($e);
+				}
+				
+			 }
 		}
 	}
 
@@ -200,7 +200,7 @@ class FoxproDataMiner {
 			'case' => '',
 			'operator' => 'eq',
 			'limit' => '500', //max is 500 records
-			'cache_limit' => 3600, //do not change, may yield duplicate results
+			'cache_limit' => 3480, //do not change, may yield duplicate results
 			'offset' => '0', //split the array result from nth position
 			'display' => 'true', //whether or not to create the function that prints out the variables, js array still created
 			'delay' => 200,
@@ -223,12 +223,23 @@ class FoxproDataMiner {
 		$table_name = $wpdb->prefix . "fdm_dbs";
 
 		if(!empty($column2) AND !empty($case)) {
-			do_action('fdm_get_db_records', array('database' => $database, 'column' => $column));
-			do_action('fdm_get_db_records', array('database' => $database, 'column' => $column2));
-			$foxpro_data_miner_data = $wpdb->get_results("SELECT a.fdm_data as fdm_data FROM $table_name a INNER JOIN $table_name b on a.fdm_id = b.fdm_id WHERE a.fdm_db = '".$database."' AND a.fdm_column = '".$column."' AND b.fdm_column = '".$column2."' AND b.fdm_data ".$operator." '".$case."' AND a.fdm_timestamp >= DATE_SUB( NOW(), INTERVAL ".$cache_limit." MINUTE) ORDER BY a.fdm_id ".$sort." LIMIT $limit", ARRAY_A);
+			$foxpro_data_miner_data = $wpdb->get_results(
+				"SELECT DISTINCT (a.id) as id, a.fdm_id,a.fdm_timestamp,a.fdm_data as fdm_data
+				    FROM $table_name a
+				    INNER JOIN $table_name b on a.fdm_id = b.fdm_id
+				    WHERE a.fdm_db = '".$database."' AND b.fdm_db = '".$database."'
+				        AND a.fdm_column = '".$column."'  AND b.fdm_column = '".$column2."'
+				        AND b.fdm_data ".$operator." '".$case."'
+				        AND a.fdm_timestamp >= DATE_SUB( NOW(), INTERVAL ".$cache_limit." SECOND) AND b.fdm_timestamp >= DATE_SUB( NOW(), INTERVAL ".$cache_limit." SECOND)
+		        ORDER BY a.fdm_id ".$sort." LIMIT $limit",
+	        ARRAY_A);
 		} else {
-			do_action('fdm_get_db_records', array('database' => $database, 'column' => $column));
-			$foxpro_data_miner_data = $wpdb->get_results("SELECT fdm_data FROM $table_name WHERE fdm_db = '".$database."' AND fdm_column = '".$column."' ORDER BY fdm_id ".$sort." AND fdm_timestamp >= DATE_SUB( NOW(), INTERVAL ".$cache_limit." MINUTE) LIMIT $limit", ARRAY_A);
+			$foxpro_data_miner_data = $wpdb->get_results(
+				"SELECT fdm_data FROM $table_name
+					WHERE fdm_db = '".$database."' AND fdm_column = '".$column."'
+					    AND fdm_timestamp >= DATE_SUB( NOW(), INTERVAL ".$cache_limit." SECOND)
+					ORDER BY fdm_id ".$sort." LIMIT $limit",
+				ARRAY_A);
 		}
 		$foxpro_data_miner_data = array_slice($foxpro_data_miner_data, $offset, $limit);
 
@@ -301,8 +312,35 @@ class FoxproDataMiner {
 		} // end if
 
 	} // end load_file
-  
+ 
 } // end class
-new FoxproDataMiner();
 
+
+	/* Check if scheduled event is added */
+
+	function fdm_setup_schedule() {
+		if ( ! wp_next_scheduled( 'fdm_hourly_event' ) ) {
+			wp_schedule_event( time(), 'hourly', 'fdm_hourly_event');
+		}
+	}
+
+	/**
+	 * On the scheduled action hook, run a function.
+	 */
+	function fdm_do_this_hourly() {
+		$date = date("Y-m-d H:i:s",time());
+		file_put_contents('C:\tmp\lol.txt', $date, FILE_APPEND);
+		global $wpdb;
+		$table_name = $wpdb->prefix . "fdm_dbs";
+		$fdm_dbs =  $wpdb->get_results("SELECT DISTINCT(fdm_db) FROM $table_name");
+		foreach ($fdm_dbs as $db) {
+			file_put_contents('C:\tmp\lol.txt', $db, FILE_APPEND);
+			$fdm_colums = $wpdb->get_results("SELECT DISTINCT(fdm_column) FROM $table_name WHERE fdm_db = '".$db."'");
+			foreach ($fdm_columns as $col) {
+				file_put_contents('C:\tmp\lol.txt', $col, FILE_APPEND);
+				do_action('fdm_update_dbs', array('database' => $db, 'database_path' => 'C:\inetpub\fdm_databases\Order.dbf', 'column' => $col, 'limit' => 3600));			
+			}
+		}
+	}
+new FoxproDataMiner();
 ?>
